@@ -1,3 +1,5 @@
-module github.com/guilhermelinosp/golang-lib-template
+module github.com/guilhermelinosp/hellnet-lib-environments
 
-go 1.24
+go 1.26
+
+require github.com/joho/godotenv v1.5.1
