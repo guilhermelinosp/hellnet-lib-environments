@@ -11,11 +11,8 @@ linters:
     - ineffassign
     - staticcheck
     - unused
-    - gosimple
     - misspell
     - unconvert
-    - gofmt
-    - goimports
     - revive
     - gocyclo
     - nakedret
@@ -33,6 +30,11 @@ linters:
     paths:
       - "**/*_test.go"
       - "_examples/**"
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
 
 issues:
   max-issues-per-linter: 0
