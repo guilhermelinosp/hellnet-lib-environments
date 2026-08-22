@@ -43,6 +43,8 @@ func LoadDotEnv(customVars ...string) error {
 
 	for _, v := range customVars {
 		if p := os.Getenv(v); p != "" {
+			p = filepath.Clean(p)
+			//nolint:gosec // G703: path from env var for .env file discovery
 			if _, err := os.Stat(p); err == nil {
 				return godotenv.Load(p)
 			}
