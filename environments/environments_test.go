@@ -162,6 +162,80 @@ func TestDeploymentEnvAndIsDev(t *testing.T) {
 	if !IsDev() {
 		t.Fatalf("expected IsDev true when Development")
 	}
+
+	// Known names are matched case-insensitively and ignoring surrounding space.
+	for _, v := range []string{"development", " Local ", "TEST", "dev"} {
+		t.Setenv("HELLNET_ENVIRONMENT", v)
+		if !IsDev() {
+			t.Fatalf("expected IsDev true for %q", v)
+		}
+	}
+
+	// Unknown values must not enable development behaviour.
+	for _, v := range []string{"production", "PRODUCTION", "prod", " Staging", "Homolog", "typo"} {
+		t.Setenv("HELLNET_ENVIRONMENT", v)
+		if IsDev() {
+			t.Fatalf("expected IsDev false for %q", v)
+		}
+	}
+}
+
+func TestLoadDotEnvSkipsUntrustedFiles(t *testing.T) {
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+
+	// World-writable .env is ignored.
+	dir := t.TempDir()
+	writable := filepath.Join(dir, ".env")
+	if err := os.WriteFile(writable, []byte("UNTRUSTED=yes\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	if err := os.Chmod(writable, 0o666); err != nil {
+		t.Fatalf("chmod .env: %v", err)
+	}
+	t.Setenv("CUSTOM_ENV_PATH", writable)
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("UNTRUSTED"); got != "" {
+		t.Fatalf("expected world-writable .env to be skipped, got UNTRUSTED=%q", got)
+	}
+
+	// .env inside a world-writable directory is ignored.
+	shared := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(shared, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(shared, 0o777); err != nil {
+		t.Fatalf("chmod dir: %v", err)
+	}
+	inShared := filepath.Join(shared, ".env")
+	if err := os.WriteFile(inShared, []byte("PLANTED=yes\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	t.Setenv("CUSTOM_ENV_PATH", inShared)
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("PLANTED"); got != "" {
+		t.Fatalf("expected .env in world-writable dir to be skipped, got PLANTED=%q", got)
+	}
+}
+
+func TestLoadDotEnvCustomVar(t *testing.T) {
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+
+	dir := t.TempDir()
+	p := filepath.Join(dir, "app.env")
+	if err := os.WriteFile(p, []byte("CUSTOM_LOADED=yes\n"), 0o600); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+	t.Setenv("CUSTOM_ENV_PATH", p)
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("CUSTOM_LOADED"); got != "yes" {
+		t.Fatalf("expected CUSTOM_LOADED=yes, got %q", got)
+	}
 }
 
 func TestLoadDotEnv(t *testing.T) {

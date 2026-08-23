@@ -16,26 +16,48 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// maxParentDirs bounds how far LoadDotEnv walks up from the working directory
+// looking for a .env file, so discovery cannot reach shared directories such as
+// /tmp, /home or the filesystem root.
+const maxParentDirs = 8
+
+// devEnvNames are the HELLNET_ENVIRONMENT values recognised as non-production.
+// Anything else — including unknown or misspelled values — is treated as
+// production so that a typo cannot enable development behaviour.
+var devEnvNames = map[string]bool{
+	"":            true,
+	"development": true,
+	"dev":         true,
+	"local":       true,
+	"test":        true,
+	"testing":     true,
+}
+
 // DeploymentEnv returns the value of HELLNET_ENVIRONMENT, or "" if unset.
 func DeploymentEnv() string {
 	return os.Getenv("HELLNET_ENVIRONMENT")
 }
 
 // IsDev reports whether the current deployment is a non-production environment.
-// It returns true when HELLNET_ENVIRONMENT is empty, "Development" or any value
-// other than "Production"/"Staging".
+// It returns true only when HELLNET_ENVIRONMENT is empty or one of the known
+// development names ("Development", "Dev", "Local", "Test", "Testing", matched
+// case-insensitively). Every other value is treated as production.
 func IsDev() bool {
-	e := DeploymentEnv()
-	return e == "" || (e != "Production" && e != "Staging")
+	return devEnvNames[strings.ToLower(strings.TrimSpace(DeploymentEnv()))]
 }
 
 // LoadDotEnv loads environment variables from a .env file for local development.
 //
-// In Production/Staging it is a no-op. When a customVars entry resolves to a
-// non-empty env var pointing to an existing file, that file is loaded.
-// Otherwise it searches, in order: the .env next to the executable, then .env
-// in the working directory and each of its parent directories, loading the
-// first one found.
+// In any non-development environment it is a no-op. When a customVars entry
+// resolves to a non-empty env var pointing to an existing file, that file is
+// loaded. Otherwise it searches, in order: the .env next to the executable,
+// then .env in the working directory and up to maxParentDirs of its parent
+// directories, loading the first one found.
+//
+// Candidates that are not regular files, or that are writable by other users,
+// or that live in a directory writable by other users, are skipped: such a file
+// could be planted by another local user to inject configuration (credentials,
+// endpoints) into the process.
 func LoadDotEnv(customVars ...string) error {
 	if !IsDev() {
 		return nil
@@ -43,9 +65,7 @@ func LoadDotEnv(customVars ...string) error {
 
 	for _, v := range customVars {
 		if p := os.Getenv(v); p != "" {
-			p = filepath.Clean(p)
-			//nolint:gosec // G703: path from env var for .env file discovery
-			if _, err := os.Stat(p); err == nil {
+			if p = filepath.Clean(p); isTrustedEnvFile(p) {
 				return godotenv.Load(p)
 			}
 		}
@@ -56,7 +76,8 @@ func LoadDotEnv(customVars ...string) error {
 		candidates = append(candidates, filepath.Join(filepath.Dir(exe), ".env"))
 	}
 	if wd, err := os.Getwd(); err == nil {
-		for dir := wd; ; {
+		dir := wd
+		for i := 0; i <= maxParentDirs; i++ {
 			candidates = append(candidates, filepath.Join(dir, ".env"))
 			parent := filepath.Dir(dir)
 			if parent == dir {
@@ -66,11 +87,29 @@ func LoadDotEnv(customVars ...string) error {
 		}
 	}
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
+		if isTrustedEnvFile(c) {
 			return godotenv.Load(c)
 		}
 	}
 	return nil
+}
+
+// isTrustedEnvFile reports whether path is an existing regular file that only
+// its owner can modify, inside a directory that only its owner can modify.
+// Symlinks are rejected because their target can be swapped after the check.
+func isTrustedEnvFile(path string) bool {
+	//nolint:gosec // G703: path is a .env candidate, validated below before use
+	fi, err := os.Lstat(path)
+	if err != nil || !fi.Mode().IsRegular() || !ownerOnlyWritable(fi.Mode()) {
+		return false
+	}
+	di, err := os.Stat(filepath.Dir(path))
+	return err == nil && di.IsDir() && ownerOnlyWritable(di.Mode())
+}
+
+// ownerOnlyWritable reports whether m denies write access to group and others.
+func ownerOnlyWritable(m os.FileMode) bool {
+	return m.Perm()&0o022 == 0
 }
 
 // GetString returns the first non-empty of prefix+suffix, fallbackPrefix+suffix,
