@@ -3,6 +3,7 @@ package environments
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,6 +56,32 @@ func TestGetInt(t *testing.T) {
 	}
 }
 
+func TestGetIntE(t *testing.T) {
+	t.Setenv("P_INT_KEY", "42")
+	n, err := GetIntE("P_", "F_", "INT_KEY", 7)
+	if err != nil || n != 42 {
+		t.Fatalf("expected (42, nil), got (%d, %v)", n, err)
+	}
+
+	os.Unsetenv("P_INT_KEY")
+	n, err = GetIntE("P_", "F_", "INT_KEY", 7)
+	if err != nil || n != 7 {
+		t.Fatalf("expected (7, nil) when unset, got (%d, %v)", n, err)
+	}
+
+	t.Setenv("F_INT_KEY", "notanint")
+	n, err = GetIntE("P_", "F_", "INT_KEY", 7)
+	if err == nil {
+		t.Fatalf("expected error for invalid integer")
+	}
+	if n != 7 {
+		t.Fatalf("expected default 7 on error, got %d", n)
+	}
+	if !strings.Contains(err.Error(), "F_INT_KEY") {
+		t.Fatalf("error should name the variable, got %v", err)
+	}
+}
+
 func TestGetBool(t *testing.T) {
 	cases := []struct {
 		val  string
@@ -81,6 +108,32 @@ func TestGetBool(t *testing.T) {
 	os.Unsetenv("B_KEY")
 	if got := GetBool("B_", "", "KEY", true); got != true {
 		t.Fatalf("expected default true, got %v", got)
+	}
+}
+
+func TestGetBoolE(t *testing.T) {
+	t.Setenv("B_KEY", "yes")
+	b, err := GetBoolE("B_", "", "KEY", false)
+	if err != nil || !b {
+		t.Fatalf("expected (true, nil), got (%v, %v)", b, err)
+	}
+
+	t.Setenv("B_KEY", "maybe")
+	b, err = GetBoolE("B_", "", "KEY", true)
+	if err == nil {
+		t.Fatalf("expected error for invalid boolean")
+	}
+	if !b {
+		t.Fatalf("expected default true on error, got %v", b)
+	}
+	if !strings.Contains(err.Error(), "B_KEY") {
+		t.Fatalf("error should name the variable, got %v", err)
+	}
+
+	os.Unsetenv("B_KEY")
+	b, err = GetBoolE("B_", "", "KEY", true)
+	if err != nil || !b {
+		t.Fatalf("expected (true, nil) when unset, got (%v, %v)", b, err)
 	}
 }
 
@@ -133,6 +186,32 @@ func TestGetDuration(t *testing.T) {
 	os.Unsetenv("DURF_KEY")
 	if got := GetDuration("DUR_", "DURF_", "KEY", time.Second); got != time.Second {
 		t.Fatalf("expected default 1s, got %v", got)
+	}
+}
+
+func TestGetDurationE(t *testing.T) {
+	t.Setenv("DUR_KEY", "1h30m")
+	d, err := GetDurationE("DUR_", "", "KEY", time.Second)
+	if err != nil || d != 90*time.Minute {
+		t.Fatalf("expected (90m, nil), got (%v, %v)", d, err)
+	}
+
+	t.Setenv("DUR_KEY", "garbage")
+	d, err = GetDurationE("DUR_", "", "KEY", time.Second)
+	if err == nil {
+		t.Fatalf("expected error for invalid duration")
+	}
+	if d != time.Second {
+		t.Fatalf("expected default 1s on error, got %v", d)
+	}
+	if !strings.Contains(err.Error(), "DUR_KEY") {
+		t.Fatalf("error should name the variable, got %v", err)
+	}
+
+	os.Unsetenv("DUR_KEY")
+	d, err = GetDurationE("DUR_", "", "KEY", time.Second)
+	if err != nil || d != time.Second {
+		t.Fatalf("expected (1s, nil) when unset, got (%v, %v)", d, err)
 	}
 }
 
@@ -193,11 +272,11 @@ func TestLoadDotEnvSkipsUntrustedFiles(t *testing.T) {
 		t.Fatalf("chmod .env: %v", err)
 	}
 	t.Setenv("CUSTOM_ENV_PATH", writable)
-	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
-		t.Fatalf("LoadDotEnv: %v", err)
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err == nil {
+		t.Fatalf("expected error for world-writable .env")
 	}
 	if got := os.Getenv("UNTRUSTED"); got != "" {
-		t.Fatalf("expected world-writable .env to be skipped, got UNTRUSTED=%q", got)
+		t.Fatalf("expected world-writable .env not to be loaded, got UNTRUSTED=%q", got)
 	}
 
 	// .env inside a world-writable directory is ignored.
@@ -213,28 +292,11 @@ func TestLoadDotEnvSkipsUntrustedFiles(t *testing.T) {
 		t.Fatalf("write .env: %v", err)
 	}
 	t.Setenv("CUSTOM_ENV_PATH", inShared)
-	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
-		t.Fatalf("LoadDotEnv: %v", err)
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err == nil {
+		t.Fatalf("expected error for .env in world-writable dir")
 	}
 	if got := os.Getenv("PLANTED"); got != "" {
-		t.Fatalf("expected .env in world-writable dir to be skipped, got PLANTED=%q", got)
-	}
-}
-
-func TestLoadDotEnvCustomVar(t *testing.T) {
-	t.Setenv("HELLNET_ENVIRONMENT", "Development")
-
-	dir := t.TempDir()
-	p := filepath.Join(dir, "app.env")
-	if err := os.WriteFile(p, []byte("CUSTOM_LOADED=yes\n"), 0o600); err != nil {
-		t.Fatalf("write env file: %v", err)
-	}
-	t.Setenv("CUSTOM_ENV_PATH", p)
-	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
-		t.Fatalf("LoadDotEnv: %v", err)
-	}
-	if got := os.Getenv("CUSTOM_LOADED"); got != "yes" {
-		t.Fatalf("expected CUSTOM_LOADED=yes, got %q", got)
+		t.Fatalf("expected .env in world-writable dir not to be loaded, got PLANTED=%q", got)
 	}
 }
 
@@ -258,9 +320,112 @@ func TestLoadDotEnv(t *testing.T) {
 	}
 }
 
+func TestLoadDotEnvCustomVarMissingFile(t *testing.T) {
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Setenv("MY_ENV_FILE", filepath.Join(t.TempDir(), "does-not-exist.env"))
+
+	err := LoadDotEnv("MY_ENV_FILE")
+	if err == nil {
+		t.Fatalf("expected error when custom var points to a missing file")
+	}
+	if !strings.Contains(err.Error(), "MY_ENV_FILE") {
+		t.Fatalf("error should name the variable, got %v", err)
+	}
+}
+
 func TestLoadDotEnvNoopInProd(t *testing.T) {
 	t.Setenv("HELLNET_ENVIRONMENT", "Production")
 	if err := LoadDotEnv(); err != nil {
 		t.Fatalf("LoadDotEnv prod: %v", err)
+	}
+}
+
+func TestLoadDotEnvCustomVar(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "custom.env")
+	if err := os.WriteFile(envPath, []byte("CUSTOM_VAR_KEY=from-custom\n"), 0o600); err != nil {
+		t.Fatalf("write custom env: %v", err)
+	}
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Setenv("CUSTOM_ENV_PATH", envPath)
+	t.Chdir(dir)
+
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("CUSTOM_VAR_KEY"); got != "from-custom" {
+		t.Fatalf("expected from-custom, got %q", got)
+	}
+}
+
+func TestLoadDotEnvCustomVarSkipsEmptyAndUnset(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FALLTHROUGH_KEY=from-cwd\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Setenv("EMPTY_ENV_PATH", "")
+	t.Chdir(dir)
+
+	if err := LoadDotEnv("UNSET_ENV_PATH", "EMPTY_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("FALLTHROUGH_KEY"); got != "from-cwd" {
+		t.Fatalf("expected from-cwd, got %q", got)
+	}
+}
+
+func TestLoadDotEnvCustomVarLoadError(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	// A directory passes the os.Stat check but cannot be parsed as a .env file.
+	t.Setenv("BROKEN_ENV_PATH", dir)
+	t.Chdir(dir)
+
+	if err := LoadDotEnv("BROKEN_ENV_PATH"); err == nil {
+		t.Fatalf("expected error when custom path is not a readable .env file")
+	}
+}
+
+func TestLoadDotEnvFromParentDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PARENT_DIR_KEY=from-parent\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	sub := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Chdir(sub)
+
+	if err := LoadDotEnv(); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("PARENT_DIR_KEY"); got != "from-parent" {
+		t.Fatalf("expected from-parent, got %q", got)
+	}
+}
+
+func TestLoadDotEnvNoFileFound(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Chdir(dir)
+
+	// No .env exists in the temp dir; parents are system dirs without one.
+	if err := LoadDotEnv(); err != nil {
+		t.Fatalf("expected nil when no .env is found, got %v", err)
+	}
+}
+
+func TestGetDurationInvalidValueFallsBackToDefault(t *testing.T) {
+	t.Setenv("DUR_KEY", "not-a-duration")
+	if got := GetDuration("DUR_", "", "KEY", 2*time.Second); got != 2*time.Second {
+		t.Fatalf("expected default 2s, got %v", got)
 	}
 }
