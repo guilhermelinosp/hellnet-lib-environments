@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -41,14 +40,12 @@ func LoadDotEnv(customVars ...string) error {
 		return nil
 	}
 
+	customPaths := make([]string, 0, len(customVars))
 	for _, v := range customVars {
-		if p := os.Getenv(v); p != "" {
-			p = filepath.Clean(p)
-			//nolint:gosec // G703: path from env var for .env file discovery
-			if _, err := os.Stat(p); err == nil {
-				return godotenv.Load(p)
-			}
-		}
+		customPaths = append(customPaths, os.Getenv(v))
+	}
+	if p, ok := firstExistingFile(customPaths...); ok {
+		return godotenv.Load(p)
 	}
 
 	candidates := []string{}
@@ -65,10 +62,8 @@ func LoadDotEnv(customVars ...string) error {
 			dir = parent
 		}
 	}
-	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			return godotenv.Load(c)
-		}
+	if p, ok := firstExistingFile(candidates...); ok {
+		return godotenv.Load(p)
 	}
 	return nil
 }
@@ -76,59 +71,26 @@ func LoadDotEnv(customVars ...string) error {
 // GetString returns the first non-empty of prefix+suffix, fallbackPrefix+suffix,
 // or def.
 func GetString(prefix, fallbackPrefix, suffix string, def string) string {
-	if v := os.Getenv(prefix + suffix); v != "" {
+	if v, ok := lookupEnv(prefix, fallbackPrefix, suffix); ok {
 		return v
-	}
-	if fallbackPrefix != "" {
-		if v := os.Getenv(fallbackPrefix + suffix); v != "" {
-			return v
-		}
 	}
 	return def
 }
 
 // GetInt is like GetString but parses an integer with the same precedence.
 func GetInt(prefix, fallbackPrefix string, suffix string, def int) int {
-	s := GetString(prefix, fallbackPrefix, suffix, "")
-	if s == "" {
-		return def
-	}
-	if n, err := strconv.Atoi(s); err == nil {
-		return n
-	}
-	return def
+	return parsedEnv(prefix, fallbackPrefix, suffix, def, strconv.Atoi)
 }
 
 // GetBool is like GetString but parses a boolean with the same precedence.
 func GetBool(prefix, fallbackPrefix string, suffix string, def bool) bool {
-	s := GetString(prefix, fallbackPrefix, suffix, "")
-	if s == "" {
-		return def
-	}
-	switch strings.ToLower(s) {
-	case "true", "1", "yes", "on":
-		return true
-	case "false", "0", "no", "off":
-		return false
-	default:
-		return def
-	}
+	return parsedEnv(prefix, fallbackPrefix, suffix, def, parseBool)
 }
 
 // GetDuration is like GetString but parses a time.Duration with the same
 // precedence. It accepts both Go duration strings and .NET "HH:MM:SS[.FFF]".
 func GetDuration(prefix, fallbackPrefix string, suffix string, def time.Duration) time.Duration {
-	s := GetString(prefix, fallbackPrefix, suffix, "")
-	if s == "" {
-		return def
-	}
-	if d, err := time.ParseDuration(s); err == nil {
-		return d
-	}
-	if d, err := ParseDuration(s); err == nil {
-		return d
-	}
-	return def
+	return parsedEnv(prefix, fallbackPrefix, suffix, def, ParseDuration)
 }
 
 // ParseDuration parses a duration string trying Go's time.ParseDuration first
@@ -137,18 +99,8 @@ func ParseDuration(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
 	}
-	var h, m, sec int
-	var frac float64
-	if n, err := fmt.Sscanf(s, "%d:%d:%d%f", &h, &m, &sec, &frac); err == nil && n == 4 {
-		return time.Duration(h)*time.Hour +
-			time.Duration(m)*time.Minute +
-			time.Duration(sec)*time.Second +
-			time.Duration(frac*float64(time.Second)), nil
-	}
-	if n, err := fmt.Sscanf(s, "%d:%d:%d", &h, &m, &sec); err == nil && n == 3 {
-		return time.Duration(h)*time.Hour +
-			time.Duration(m)*time.Minute +
-			time.Duration(sec)*time.Second, nil
+	if d, ok := parseClockDuration(s); ok {
+		return d, nil
 	}
 	return 0, fmt.Errorf("invalid duration: %q", s)
 }

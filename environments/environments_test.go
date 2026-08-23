@@ -113,8 +113,10 @@ func TestParseDuration(t *testing.T) {
 	}
 
 	// Invalid.
-	if _, err := ParseDuration("garbage"); err == nil {
-		t.Fatalf("expected error for invalid duration")
+	for _, s := range []string{"garbage", "01:30", "aa:bb:cc", "00:00:05.xx"} {
+		if _, err := ParseDuration(s); err == nil {
+			t.Fatalf("expected error for invalid duration %q", s)
+		}
 	}
 }
 
