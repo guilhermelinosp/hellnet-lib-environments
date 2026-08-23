@@ -29,6 +29,12 @@ func TestGetString(t *testing.T) {
 	if got := GetString("MISSING_", "", "KEY", "onlydef"); got != "onlydef" {
 		t.Fatalf("expected onlydef, got %q", got)
 	}
+
+	// Empty primary prefix reads the bare suffix variable.
+	t.Setenv("BARE_KEY", "bare")
+	if got := GetString("", "MY_FALLBACK_", "BARE_KEY", "def"); got != "bare" {
+		t.Fatalf("expected bare, got %q", got)
+	}
 }
 
 func TestGetInt(t *testing.T) {

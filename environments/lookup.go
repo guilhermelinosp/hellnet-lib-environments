@@ -12,11 +12,11 @@ import (
 // fallbackPrefix+suffix, reporting whether one was found. An empty
 // fallbackPrefix disables the fallback lookup.
 func lookupEnv(prefix, fallbackPrefix, suffix string) (string, bool) {
-	for _, p := range [...]string{prefix, fallbackPrefix} {
-		if p == "" {
-			continue
-		}
-		if v := os.Getenv(p + suffix); v != "" {
+	if v := os.Getenv(prefix + suffix); v != "" {
+		return v, true
+	}
+	if fallbackPrefix != "" {
+		if v := os.Getenv(fallbackPrefix + suffix); v != "" {
 			return v, true
 		}
 	}
