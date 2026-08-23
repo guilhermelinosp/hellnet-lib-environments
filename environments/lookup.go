@@ -1,59 +1,57 @@
 package environments
 
 import (
+	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
-// lookupEnv returns the first non-empty value of prefix+suffix or
-// fallbackPrefix+suffix, reporting whether one was found. An empty
-// fallbackPrefix disables the fallback lookup.
-func lookupEnv(prefix, fallbackPrefix, suffix string) (string, bool) {
-	if v := os.Getenv(prefix + suffix); v != "" {
-		return v, true
+// lookup returns the first non-empty value of prefix+suffix or
+// fallbackPrefix+suffix, along with the name of the variable it came from.
+func lookup(prefix, fallbackPrefix, suffix string) (val, name string, ok bool) {
+	name = prefix + suffix
+	if v := os.Getenv(name); v != "" {
+		return v, name, true
 	}
 	if fallbackPrefix != "" {
-		if v := os.Getenv(fallbackPrefix + suffix); v != "" {
-			return v, true
+		name = fallbackPrefix + suffix
+		if v := os.Getenv(name); v != "" {
+			return v, name, true
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // parsedEnv resolves an environment variable with the standard precedence and
-// converts it with parse. It returns def when no value is set or when parsing
-// fails.
-func parsedEnv[T any](prefix, fallbackPrefix, suffix string, def T, parse func(string) (T, error)) T {
-	s, ok := lookupEnv(prefix, fallbackPrefix, suffix)
+// converts it with parse. Unset variables yield (def, nil); a parse failure
+// yields def and an error naming the variable it came from.
+func parsedEnv[T any](prefix, fallbackPrefix, suffix string, def T, parse func(string) (T, error)) (T, error) {
+	s, name, ok := lookup(prefix, fallbackPrefix, suffix)
 	if !ok {
-		return def
+		return def, nil
 	}
 	v, err := parse(s)
 	if err != nil {
-		return def
+		return def, fmt.Errorf("environments: %s: %w", name, err)
 	}
-	return v
+	return v, nil
 }
 
-// firstExistingFile returns the first path that exists on disk.
-func firstExistingFile(paths ...string) (string, bool) {
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
-		p = filepath.Clean(p)
-		//nolint:gosec // G703: paths come from env vars for .env file discovery
-		if _, err := os.Stat(p); err == nil {
-			return p, true
-		}
+// parseInt parses an integer, describing the offending value on failure.
+func parseInt(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer %q: %w", s, err)
 	}
-	return "", false
+	return n, nil
 }
 
-// parseBool accepts the common textual spellings of a boolean.
+// parseBool accepts the common textual spellings of a boolean
+// (true/false, 1/0, yes/no, on/off, case-insensitive).
 func parseBool(s string) (bool, error) {
 	switch strings.ToLower(s) {
 	case "true", "1", "yes", "on":
@@ -61,7 +59,7 @@ func parseBool(s string) (bool, error) {
 	case "false", "0", "no", "off":
 		return false, nil
 	default:
-		return false, strconv.ErrSyntax
+		return false, fmt.Errorf("invalid boolean %q", s)
 	}
 }
 
@@ -88,4 +86,12 @@ func parseClockDuration(s string) (time.Duration, bool) {
 		total += time.Duration(f * float64(time.Second))
 	}
 	return total, true
+}
+
+// loadEnvFile loads a .env file, wrapping any failure with its path.
+func loadEnvFile(path string) error {
+	if err := godotenv.Load(path); err != nil {
+		return fmt.Errorf("environments: load %q: %w", path, err)
+	}
+	return nil
 }
