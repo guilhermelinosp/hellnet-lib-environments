@@ -30,6 +30,12 @@ func TestGetString(t *testing.T) {
 	if got := GetString("MISSING_", "", "KEY", "onlydef"); got != "onlydef" {
 		t.Fatalf("expected onlydef, got %q", got)
 	}
+
+	// Empty primary prefix reads the bare suffix variable.
+	t.Setenv("BARE_KEY", "bare")
+	if got := GetString("", "MY_FALLBACK_", "BARE_KEY", "def"); got != "bare" {
+		t.Fatalf("expected bare, got %q", got)
+	}
 }
 
 func TestGetInt(t *testing.T) {
@@ -166,8 +172,10 @@ func TestParseDuration(t *testing.T) {
 	}
 
 	// Invalid.
-	if _, err := ParseDuration("garbage"); err == nil {
-		t.Fatalf("expected error for invalid duration")
+	for _, s := range []string{"garbage", "01:30", "aa:bb:cc", "00:00:05.xx"} {
+		if _, err := ParseDuration(s); err == nil {
+			t.Fatalf("expected error for invalid duration %q", s)
+		}
 	}
 }
 
@@ -359,7 +367,7 @@ func TestLoadDotEnvCustomVar(t *testing.T) {
 	}
 }
 
-func TestLoadDotEnvCustomVarSkipsEmptyAndUnset(t *testing.T) {
+func TestLoadDotEnvCustomVarSkipsUnsetAndEmpty(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FALLTHROUGH_KEY=from-cwd\n"), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
