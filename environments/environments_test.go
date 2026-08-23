@@ -190,3 +190,94 @@ func TestLoadDotEnvNoopInProd(t *testing.T) {
 		t.Fatalf("LoadDotEnv prod: %v", err)
 	}
 }
+
+func TestLoadDotEnvCustomVar(t *testing.T) {
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, "custom.env")
+	if err := os.WriteFile(envPath, []byte("CUSTOM_VAR_KEY=from-custom\n"), 0o600); err != nil {
+		t.Fatalf("write custom env: %v", err)
+	}
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Setenv("CUSTOM_ENV_PATH", envPath)
+	t.Chdir(dir)
+
+	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("CUSTOM_VAR_KEY"); got != "from-custom" {
+		t.Fatalf("expected from-custom, got %q", got)
+	}
+}
+
+func TestLoadDotEnvCustomVarSkipsEmptyAndMissing(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FALLTHROUGH_KEY=from-cwd\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Setenv("EMPTY_ENV_PATH", "")
+	t.Setenv("MISSING_ENV_PATH", filepath.Join(dir, "does-not-exist.env"))
+	t.Chdir(dir)
+
+	if err := LoadDotEnv("UNSET_ENV_PATH", "EMPTY_ENV_PATH", "MISSING_ENV_PATH"); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("FALLTHROUGH_KEY"); got != "from-cwd" {
+		t.Fatalf("expected from-cwd, got %q", got)
+	}
+}
+
+func TestLoadDotEnvCustomVarLoadError(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	// A directory passes the os.Stat check but cannot be parsed as a .env file.
+	t.Setenv("BROKEN_ENV_PATH", dir)
+	t.Chdir(dir)
+
+	if err := LoadDotEnv("BROKEN_ENV_PATH"); err == nil {
+		t.Fatalf("expected error when custom path is not a readable .env file")
+	}
+}
+
+func TestLoadDotEnvFromParentDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("PARENT_DIR_KEY=from-parent\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	sub := filepath.Join(dir, "a", "b")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Chdir(sub)
+
+	if err := LoadDotEnv(); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("PARENT_DIR_KEY"); got != "from-parent" {
+		t.Fatalf("expected from-parent, got %q", got)
+	}
+}
+
+func TestLoadDotEnvNoFileFound(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+	t.Chdir(dir)
+
+	// No .env exists in the temp dir; parents are system dirs without one.
+	if err := LoadDotEnv(); err != nil {
+		t.Fatalf("expected nil when no .env is found, got %v", err)
+	}
+}
+
+func TestGetDurationInvalidValueFallsBackToDefault(t *testing.T) {
+	t.Setenv("DUR_KEY", "not-a-duration")
+	if got := GetDuration("DUR_", "", "KEY", 2*time.Second); got != 2*time.Second {
+		t.Fatalf("expected default 2s, got %v", got)
+	}
+}
