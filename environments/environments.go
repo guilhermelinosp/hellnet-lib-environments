@@ -11,11 +11,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
-
-	"github.com/joho/godotenv"
 )
 
 // DeploymentEnv returns the value of HELLNET_ENVIRONMENT, or "" if unset.
@@ -51,10 +47,7 @@ func LoadDotEnv(customVars ...string) error {
 			if _, err := os.Stat(p); err != nil {
 				return fmt.Errorf("environments: %s=%q: %w", v, p, err)
 			}
-			if err := godotenv.Load(p); err != nil {
-				return fmt.Errorf("environments: load %q: %w", p, err)
-			}
-			return nil
+			return loadEnvFile(p)
 		}
 	}
 
@@ -73,35 +66,15 @@ func LoadDotEnv(customVars ...string) error {
 		}
 	}
 	for _, c := range candidates {
-		_, err := os.Stat(c)
-		if err != nil {
+		if _, err := os.Stat(c); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}
 			return fmt.Errorf("environments: stat %q: %w", c, err)
 		}
-		if err := godotenv.Load(c); err != nil {
-			return fmt.Errorf("environments: load %q: %w", c, err)
-		}
-		return nil
+		return loadEnvFile(c)
 	}
 	return nil
-}
-
-// lookup returns the first non-empty value of prefix+suffix or
-// fallbackPrefix+suffix, along with the name of the variable it came from.
-func lookup(prefix, fallbackPrefix, suffix string) (val, name string, ok bool) {
-	name = prefix + suffix
-	if v := os.Getenv(name); v != "" {
-		return v, name, true
-	}
-	if fallbackPrefix != "" {
-		name = fallbackPrefix + suffix
-		if v := os.Getenv(name); v != "" {
-			return v, name, true
-		}
-	}
-	return "", "", false
 }
 
 // GetString returns the first non-empty of prefix+suffix, fallbackPrefix+suffix,
@@ -123,15 +96,7 @@ func GetInt(prefix, fallbackPrefix string, suffix string, def int) int {
 // GetIntE is like GetInt but returns an error when the variable is set to a
 // value that cannot be parsed as an integer. Unset variables yield (def, nil).
 func GetIntE(prefix, fallbackPrefix string, suffix string, def int) (int, error) {
-	s, name, ok := lookup(prefix, fallbackPrefix, suffix)
-	if !ok {
-		return def, nil
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil {
-		return def, fmt.Errorf("environments: %s: invalid integer %q: %w", name, s, err)
-	}
-	return n, nil
+	return parsedEnv(prefix, fallbackPrefix, suffix, def, parseInt)
 }
 
 // GetBool is like GetString but parses a boolean with the same precedence.
@@ -145,18 +110,7 @@ func GetBool(prefix, fallbackPrefix string, suffix string, def bool) bool {
 // value that is not a recognized boolean (true/false, 1/0, yes/no, on/off,
 // case-insensitive). Unset variables yield (def, nil).
 func GetBoolE(prefix, fallbackPrefix string, suffix string, def bool) (bool, error) {
-	s, name, ok := lookup(prefix, fallbackPrefix, suffix)
-	if !ok {
-		return def, nil
-	}
-	switch strings.ToLower(s) {
-	case "true", "1", "yes", "on":
-		return true, nil
-	case "false", "0", "no", "off":
-		return false, nil
-	default:
-		return def, fmt.Errorf("environments: %s: invalid boolean %q", name, s)
-	}
+	return parsedEnv(prefix, fallbackPrefix, suffix, def, parseBool)
 }
 
 // GetDuration is like GetString but parses a time.Duration with the same
@@ -171,15 +125,7 @@ func GetDuration(prefix, fallbackPrefix string, suffix string, def time.Duration
 // set to a value that cannot be parsed as a duration. Unset variables yield
 // (def, nil).
 func GetDurationE(prefix, fallbackPrefix string, suffix string, def time.Duration) (time.Duration, error) {
-	s, name, ok := lookup(prefix, fallbackPrefix, suffix)
-	if !ok {
-		return def, nil
-	}
-	d, err := ParseDuration(s)
-	if err != nil {
-		return def, fmt.Errorf("environments: %s: %w", name, err)
-	}
-	return d, nil
+	return parsedEnv(prefix, fallbackPrefix, suffix, def, ParseDuration)
 }
 
 // ParseDuration parses a duration string trying Go's time.ParseDuration first
@@ -188,18 +134,8 @@ func ParseDuration(s string) (time.Duration, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return d, nil
 	}
-	var h, m, sec int
-	var frac float64
-	if n, err := fmt.Sscanf(s, "%d:%d:%d%f", &h, &m, &sec, &frac); err == nil && n == 4 {
-		return time.Duration(h)*time.Hour +
-			time.Duration(m)*time.Minute +
-			time.Duration(sec)*time.Second +
-			time.Duration(frac*float64(time.Second)), nil
-	}
-	if n, err := fmt.Sscanf(s, "%d:%d:%d", &h, &m, &sec); err == nil && n == 3 {
-		return time.Duration(h)*time.Hour +
-			time.Duration(m)*time.Minute +
-			time.Duration(sec)*time.Second, nil
+	if d, ok := parseClockDuration(s); ok {
+		return d, nil
 	}
 	return 0, fmt.Errorf("invalid duration: %q", s)
 }

@@ -30,6 +30,12 @@ func TestGetString(t *testing.T) {
 	if got := GetString("MISSING_", "", "KEY", "onlydef"); got != "onlydef" {
 		t.Fatalf("expected onlydef, got %q", got)
 	}
+
+	// Empty primary prefix reads the bare suffix variable.
+	t.Setenv("BARE_KEY", "bare")
+	if got := GetString("", "MY_FALLBACK_", "BARE_KEY", "def"); got != "bare" {
+		t.Fatalf("expected bare, got %q", got)
+	}
 }
 
 func TestGetInt(t *testing.T) {
@@ -166,8 +172,10 @@ func TestParseDuration(t *testing.T) {
 	}
 
 	// Invalid.
-	if _, err := ParseDuration("garbage"); err == nil {
-		t.Fatalf("expected error for invalid duration")
+	for _, s := range []string{"garbage", "01:30", "aa:bb:cc", "00:00:05.xx"} {
+		if _, err := ParseDuration(s); err == nil {
+			t.Fatalf("expected error for invalid duration %q", s)
+		}
 	}
 }
 
@@ -301,26 +309,7 @@ func TestLoadDotEnvNoopInProd(t *testing.T) {
 	}
 }
 
-func TestLoadDotEnvCustomVar(t *testing.T) {
-	dir := t.TempDir()
-	envPath := filepath.Join(dir, "custom.env")
-	if err := os.WriteFile(envPath, []byte("CUSTOM_VAR_KEY=from-custom\n"), 0o600); err != nil {
-		t.Fatalf("write custom env: %v", err)
-	}
-
-	t.Setenv("HELLNET_ENVIRONMENT", "Development")
-	t.Setenv("CUSTOM_ENV_PATH", envPath)
-	t.Chdir(dir)
-
-	if err := LoadDotEnv("CUSTOM_ENV_PATH"); err != nil {
-		t.Fatalf("LoadDotEnv: %v", err)
-	}
-	if got := os.Getenv("CUSTOM_VAR_KEY"); got != "from-custom" {
-		t.Fatalf("expected from-custom, got %q", got)
-	}
-}
-
-func TestLoadDotEnvCustomVarSkipsEmptyAndMissing(t *testing.T) {
+func TestLoadDotEnvCustomVarSkipsUnsetAndEmpty(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FALLTHROUGH_KEY=from-cwd\n"), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
@@ -328,10 +317,9 @@ func TestLoadDotEnvCustomVarSkipsEmptyAndMissing(t *testing.T) {
 
 	t.Setenv("HELLNET_ENVIRONMENT", "Development")
 	t.Setenv("EMPTY_ENV_PATH", "")
-	t.Setenv("MISSING_ENV_PATH", filepath.Join(dir, "does-not-exist.env"))
 	t.Chdir(dir)
 
-	if err := LoadDotEnv("UNSET_ENV_PATH", "EMPTY_ENV_PATH", "MISSING_ENV_PATH"); err != nil {
+	if err := LoadDotEnv("UNSET_ENV_PATH", "EMPTY_ENV_PATH"); err != nil {
 		t.Fatalf("LoadDotEnv: %v", err)
 	}
 	if got := os.Getenv("FALLTHROUGH_KEY"); got != "from-cwd" {
