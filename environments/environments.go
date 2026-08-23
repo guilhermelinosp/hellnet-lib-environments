@@ -111,10 +111,12 @@ func envCandidates() []string {
 	return candidates
 }
 
-// loadFirstFound loads the first existing, trusted candidate.
+// loadFirstFound loads the first existing, trusted candidate. Candidates are
+// probed with Lstat so that a symlink — including a broken or looping one —
+// is rejected by isTrustedEnvFile instead of failing discovery.
 func loadFirstFound(candidates []string) error {
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err != nil {
+		if _, err := os.Lstat(c); err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
 				continue
 			}

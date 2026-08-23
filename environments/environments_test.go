@@ -308,6 +308,31 @@ func TestLoadDotEnvSkipsUntrustedFiles(t *testing.T) {
 	}
 }
 
+func TestLoadDotEnvSkipsSymlinkedCandidate(t *testing.T) {
+	t.Setenv("HELLNET_ENVIRONMENT", "Development")
+
+	base := t.TempDir()
+	if err := os.WriteFile(filepath.Join(base, ".env"), []byte("BEYOND_SYMLINK=yes\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	child := filepath.Join(base, "child")
+	if err := os.Mkdir(child, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A symlink loop makes os.Stat fail with ELOOP rather than ErrNotExist.
+	if err := os.Symlink(".env", filepath.Join(child, ".env")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	t.Chdir(child)
+
+	if err := LoadDotEnv(); err != nil {
+		t.Fatalf("LoadDotEnv: %v", err)
+	}
+	if got := os.Getenv("BEYOND_SYMLINK"); got != "yes" {
+		t.Fatalf("expected discovery to continue past symlinked .env, got %q", got)
+	}
+}
+
 func TestLoadDotEnv(t *testing.T) {
 	dir := t.TempDir()
 	envPath := filepath.Join(dir, ".env")
