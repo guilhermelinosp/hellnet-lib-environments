@@ -5,6 +5,29 @@
 
 Click **"Use this template"** to scaffold a new Go library in seconds.
 
+## 🧒 Entenda com 15 anos
+
+**A analogia**: as env vars são a **lixeira de anotações** presa na porta da geladeira da casa, onde todo mundo cola bilhetes tipo *"senha do wi-fi: XXX"* e *"fone do vizinho: YYY"*. Cada ambiente tem **sua própria lixeira** — seu quarto (*Development*), a casa dos amigos (*Staging*), a escola (*Production*) — com valores diferentes em cada uma, e o programa funciona **igualzinho nos três**.
+
+**O problema que resolve**: sem isso, cada programa inventaria seu próprio jeito de ler configuração. Esta lib **é o jeito padrão da família Hellnet** de ler essas anotações (+ arquivo `.env`), sem duplicar código.
+
+### Mini-dicionário
+
+- **env var** — uma anotação pendurada na porta da geladeira.
+- **`.env`** — caderninho local que vira anotações na porta quando você está desenvolvendo.
+- **prefixo** — todas as anotações da família começam com `HELLNET_`.
+- **fallback/default** — se a nota não existe, uso o valor combinado.
+- **`GetString`/`GetInt`/`GetBool`/`GetDuration`** — pergunte à lixeira textos, números, sim/não, tempos.
+- **`LoadDotEnv`** — cola o caderninho na porta automaticamente em dev.
+
+Quer saber, por exemplo, em qual endereço está o banco?
+
+```go
+host := environments.GetString("HELLNET_DATABASE_", "", "HOST", "localhost")
+```
+
+Cada posição do argumento significa uma coisa: `"HELLNET_DATABASE_"` é a **família**, `""` é a **sub-família** (vazio = nenhuma), `"HOST"` é o **nome da nota**, e `"localhost"` é o **valor combinado** caso não encontre a nota.
+
 ## What's included
 
 - **Go module** seeded with a tiny, tested example API (`Greet`) — delete it and start coding.
