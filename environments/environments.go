@@ -11,8 +11,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // maxParentDirs bounds how far LoadDotEnv walks up from the working directory
@@ -152,6 +155,86 @@ func ownerOnlyWritable(m os.FileMode) bool {
 	return m.Perm()&0o022 == 0
 }
 
+// Get returns the value of the environment variable with the given name.
+// If the variable is set, returns its value.
+// If not set and a default is provided (via variadic), returns the default.
+// If not set and no default provided, panics with a clear message.
+//
+// Usage:
+//
+//	Get("HELLNET_KAFKA_TOPIC_ORDER_REQUESTED")                              // panic if not set
+//	Get("HELLNET_KAFKA_TOPIC_ORDER_REQUESTED", "my-default")                // return default if not set
+func Get(name string, def ...string) string {
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	if len(def) > 0 {
+		return def[0]
+	}
+	panic("environments: required environment variable " + name + " is not set")
+}
+
+// GetInt returns the value of the environment variable as an integer.
+// If the variable is set and can be parsed as an integer, returns its value.
+// If not set and a default is provided (via variadic), returns the default.
+// If not set and no default provided, panics with a clear message.
+// If set but cannot be parsed as an integer, panics.
+//
+// Usage:
+//
+//	GetInt("HELLNET_KAFKA_MAX_RETRIES")                              // panic if not set
+//	GetInt("HELLNET_KAFKA_MAX_RETRIES", "3")                        // return default if not set
+//	GetInt("HELLNET_KAFKA_MAX_RETRIES", "3", "5")                   // return default if not set (first def used)
+func GetInt(name string, def ...string) int {
+	s := Get(name, def...)
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		panic("environments: environment variable " + name + " = " + s + " is not a valid integer")
+	}
+	return n
+}
+
+// GetBool returns the value of the environment variable as a boolean.
+// If the variable is set and can be parsed as a boolean, returns its value.
+// If not set and a default is provided (via variadic), returns the default.
+// If not set and no default provided, panics with a clear message.
+// If set but cannot be parsed as a boolean, panics.
+//
+// Usage:
+//
+//	GetBool("HELLNET_KAFKA_IDEMPOTENT")                              // panic if not set
+//	GetBool("HELLNET_KAFKA_IDEMPOTENT", "true")                     // return default if not set
+func GetBool(name string, def ...string) bool {
+	s := Get(name, def...)
+	switch strings.ToLower(s) {
+	case "true", "1", "yes", "on":
+		return true
+	case "false", "0", "no", "off":
+		return false
+	default:
+		panic("environments: environment variable " + name + " = " + s + " is not a valid boolean")
+	}
+}
+
+// GetDuration returns the value of the environment variable as a time.Duration.
+// If the variable is set and can be parsed as a duration, returns its value.
+// If not set and a default is provided (via variadic), returns the default.
+// If not set and no default provided, panics with a clear message.
+// If set but cannot be parsed as a duration, panics.
+//
+// Usage:
+//
+//	GetDuration("HELLNET_KAFKA_RETRY_DELAY")                              // panic if not set
+//	GetDuration("HELLNET_KAFKA_RETRY_DELAY", "200ms")                    // return default if not set
+func GetDuration(name string, def ...string) time.Duration {
+	s := Get(name, def...)
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		panic("environments: environment variable " + name + " = " + s + " is not a valid duration")
+	}
+	return d
+}
+
 // GetString returns the first non-empty of prefix+suffix, fallbackPrefix+suffix,
 // or def.
 func GetString(prefix, fallbackPrefix, suffix string, def string) string {
@@ -161,56 +244,38 @@ func GetString(prefix, fallbackPrefix, suffix string, def string) string {
 	return def
 }
 
-// GetInt is like GetString but parses an integer with the same precedence.
-// Unparseable values fall back to def; use GetIntE to surface parse errors.
-func GetInt(prefix, fallbackPrefix string, suffix string, def int) int {
-	n, _ := GetIntE(prefix, fallbackPrefix, suffix, def)
-	return n
-}
-
-// GetIntE is like GetInt but returns an error when the variable is set to a
-// value that cannot be parsed as an integer. Unset variables yield (def, nil).
-func GetIntE(prefix, fallbackPrefix string, suffix string, def int) (int, error) {
-	return parsedEnv(prefix, fallbackPrefix, suffix, def, parseInt)
-}
-
-// GetBool is like GetString but parses a boolean with the same precedence.
-// Unparseable values fall back to def; use GetBoolE to surface parse errors.
-func GetBool(prefix, fallbackPrefix string, suffix string, def bool) bool {
-	b, _ := GetBoolE(prefix, fallbackPrefix, suffix, def)
-	return b
-}
-
-// GetBoolE is like GetBool but returns an error when the variable is set to a
-// value that is not a recognized boolean (true/false, 1/0, yes/no, on/off,
-// case-insensitive). Unset variables yield (def, nil).
-func GetBoolE(prefix, fallbackPrefix string, suffix string, def bool) (bool, error) {
-	return parsedEnv(prefix, fallbackPrefix, suffix, def, parseBool)
-}
-
-// GetDuration is like GetString but parses a time.Duration with the same
-// precedence. It accepts both Go duration strings and .NET "HH:MM:SS[.FFF]".
-// Unparseable values fall back to def; use GetDurationE to surface parse errors.
-func GetDuration(prefix, fallbackPrefix string, suffix string, def time.Duration) time.Duration {
-	d, _ := GetDurationE(prefix, fallbackPrefix, suffix, def)
-	return d
-}
-
-// GetDurationE is like GetDuration but returns an error when the variable is
-// set to a value that cannot be parsed as a duration. Unset variables yield
-// (def, nil).
-func GetDurationE(prefix, fallbackPrefix string, suffix string, def time.Duration) (time.Duration, error) {
-	return parsedEnv(prefix, fallbackPrefix, suffix, def, ParseDuration)
-}
-
-// ParseDuration parses a duration string trying Go's time.ParseDuration first
-// and then the .NET "HH:MM:SS" or "HH:MM:SS.FFF" format.
-func ParseDuration(s string) (time.Duration, error) {
-	if d, err := time.ParseDuration(s); err == nil {
-		return d, nil
+// GetRequiredString returns the value of prefix+suffix environment variable,
+// or panics if the environment variable is not set.
+// Use for required configuration that must be explicitly set.
+// The environment variable name is prefix + "HELLNET_" + suffix.
+func GetRequiredString(prefix, suffix string) string {
+	if v, _, ok := lookup(prefix, "", suffix); ok {
+		return v
 	}
-	if d, ok := parseClockDuration(s); ok {
-		return d, nil
+	name := prefix + "HELLNET_" + suffix
+	panic("environments: required environment variable " + name + " is not set")
+}
+
+// lookup returns the first non-empty of prefix+suffix or fallbackPrefix+suffix,
+// along with the name of the variable it came from.
+func lookup(prefix, fallbackPrefix, suffix string) (val, name string, ok bool) {
+	name = prefix + "HELLNET_" + suffix
+	if v := os.Getenv(name); v != "" {
+		return v, name, true
 	}
-	return 0, fmt.Errorf("invalid duration: %q", s)
+	if fallbackPrefix != "" {
+		name = fallbackPrefix + "HELLNET_" + suffix
+		if v := os.Getenv(name); v != "" {
+			return v, name, true
+		}
+	}
+	return "", "", false
+}
+
+// loadEnvFile loads a .env file, wrapping any failure with its path.
+func loadEnvFile(path string) error {
+	if err := godotenv.Load(path); err != nil {
+		return fmt.Errorf("environments: load %q: %w", path, err)
+	}
+	return nil
 }

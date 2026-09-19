@@ -9,19 +9,19 @@ import (
 )
 
 func TestGetString(t *testing.T) {
-	t.Setenv("MY_PREFIX_KEY", "primary")
-	t.Setenv("MY_FALLBACK_KEY", "fallback")
+	t.Setenv("MY_PREFIX_HELLNET_KEY", "primary")
+	t.Setenv("MY_FALLBACK_HELLNET_KEY", "fallback")
 
 	if got := GetString("MY_PREFIX_", "MY_FALLBACK_", "KEY", "def"); got != "primary" {
 		t.Fatalf("expected primary, got %q", got)
 	}
 
-	os.Unsetenv("MY_PREFIX_KEY")
+	os.Unsetenv("MY_PREFIX_HELLNET_KEY")
 	if got := GetString("MY_PREFIX_", "MY_FALLBACK_", "KEY", "def"); got != "fallback" {
 		t.Fatalf("expected fallback, got %q", got)
 	}
 
-	os.Unsetenv("MY_FALLBACK_KEY")
+	os.Unsetenv("MY_FALLBACK_HELLNET_KEY")
 	if got := GetString("MY_PREFIX_", "MY_FALLBACK_", "KEY", "def"); got != "def" {
 		t.Fatalf("expected def, got %q", got)
 	}
@@ -32,60 +32,43 @@ func TestGetString(t *testing.T) {
 	}
 
 	// Empty primary prefix reads the bare suffix variable.
-	t.Setenv("BARE_KEY", "bare")
+	t.Setenv("HELLNET_BARE_KEY", "bare")
 	if got := GetString("", "MY_FALLBACK_", "BARE_KEY", "def"); got != "bare" {
 		t.Fatalf("expected bare, got %q", got)
 	}
 }
 
 func TestGetInt(t *testing.T) {
-	t.Setenv("P_INT_KEY", "42")
-	if got := GetInt("P_", "F_", "INT_KEY", 7); got != 42 {
+	t.Setenv("INT_KEY", "42")
+	if got := GetInt("INT_KEY", "7"); got != 42 {
 		t.Fatalf("expected 42, got %d", got)
 	}
 
-	os.Unsetenv("P_INT_KEY")
-	t.Setenv("F_INT_KEY", "99")
-	if got := GetInt("P_", "F_", "INT_KEY", 7); got != 99 {
-		t.Fatalf("expected 99, got %d", got)
-	}
-
-	os.Unsetenv("F_INT_KEY")
-	if got := GetInt("P_", "F_", "INT_KEY", 7); got != 7 {
+	os.Unsetenv("INT_KEY")
+	if got := GetInt("INT_KEY", "7"); got != 7 {
 		t.Fatalf("expected 7, got %d", got)
 	}
 
-	// Non-integer value falls back to default.
-	t.Setenv("P_INT_KEY", "notanint")
-	if got := GetInt("P_", "F_", "INT_KEY", 7); got != 7 {
-		t.Fatalf("expected 7 on parse error, got %d", got)
-	}
-}
+	// Missing with no default panics.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic when required var missing")
+			}
+		}()
+		GetInt("NEVER_SET_KEY")
+	}()
 
-func TestGetIntE(t *testing.T) {
-	t.Setenv("P_INT_KEY", "42")
-	n, err := GetIntE("P_", "F_", "INT_KEY", 7)
-	if err != nil || n != 42 {
-		t.Fatalf("expected (42, nil), got (%d, %v)", n, err)
-	}
-
-	os.Unsetenv("P_INT_KEY")
-	n, err = GetIntE("P_", "F_", "INT_KEY", 7)
-	if err != nil || n != 7 {
-		t.Fatalf("expected (7, nil) when unset, got (%d, %v)", n, err)
-	}
-
-	t.Setenv("F_INT_KEY", "notanint")
-	n, err = GetIntE("P_", "F_", "INT_KEY", 7)
-	if err == nil {
-		t.Fatalf("expected error for invalid integer")
-	}
-	if n != 7 {
-		t.Fatalf("expected default 7 on error, got %d", n)
-	}
-	if !strings.Contains(err.Error(), "F_INT_KEY") {
-		t.Fatalf("error should name the variable, got %v", err)
-	}
+	// Non-integer value panics.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic for invalid integer")
+			}
+		}()
+		t.Setenv("INT_KEY", "notanint")
+		GetInt("INT_KEY", "7")
+	}()
 }
 
 func TestGetBool(t *testing.T) {
@@ -102,124 +85,42 @@ func TestGetBool(t *testing.T) {
 		{"0", false},
 		{"no", false},
 		{"off", false},
-		{"maybe", false}, // default when unparseable
 	}
 	for _, c := range cases {
 		t.Setenv("B_KEY", c.val)
-		if got := GetBool("B_", "", "KEY", false); got != c.want {
+		if got := GetBool("B_KEY", "false"); got != c.want {
 			t.Fatalf("value %q: expected %v, got %v", c.val, c.want, got)
 		}
 	}
 
 	os.Unsetenv("B_KEY")
-	if got := GetBool("B_", "", "KEY", true); got != true {
+	if got := GetBool("B_KEY", "true"); got != true {
 		t.Fatalf("expected default true, got %v", got)
 	}
 }
 
-func TestGetBoolE(t *testing.T) {
-	t.Setenv("B_KEY", "yes")
-	b, err := GetBoolE("B_", "", "KEY", false)
-	if err != nil || !b {
-		t.Fatalf("expected (true, nil), got (%v, %v)", b, err)
-	}
-
-	t.Setenv("B_KEY", "maybe")
-	b, err = GetBoolE("B_", "", "KEY", true)
-	if err == nil {
-		t.Fatalf("expected error for invalid boolean")
-	}
-	if !b {
-		t.Fatalf("expected default true on error, got %v", b)
-	}
-	if !strings.Contains(err.Error(), "B_KEY") {
-		t.Fatalf("error should name the variable, got %v", err)
-	}
-
-	os.Unsetenv("B_KEY")
-	b, err = GetBoolE("B_", "", "KEY", true)
-	if err != nil || !b {
-		t.Fatalf("expected (true, nil) when unset, got (%v, %v)", b, err)
-	}
-}
-
-func TestParseDuration(t *testing.T) {
-	// Go duration format.
-	d, err := ParseDuration("1h30m")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if d != 90*time.Minute {
-		t.Fatalf("expected 90m, got %v", d)
-	}
-
-	// .NET HH:MM:SS.
-	d, err = ParseDuration("01:30:00")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if d != 90*time.Minute {
-		t.Fatalf("expected 90m, got %v", d)
-	}
-
-	// .NET HH:MM:SS.FFF.
-	d, err = ParseDuration("00:00:05.500")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if d != 5*time.Second+500*time.Millisecond {
-		t.Fatalf("expected 5.5s, got %v", d)
-	}
-
-	// Invalid.
-	for _, s := range []string{"garbage", "01:30", "aa:bb:cc", "00:00:05.xx"} {
-		if _, err := ParseDuration(s); err == nil {
-			t.Fatalf("expected error for invalid duration %q", s)
-		}
+func TestGetDurationGoFormat(t *testing.T) {
+	// Go duration format is supported by GetDuration.
+	t.Setenv("DUR_KEY", "1h30m")
+	if got := GetDuration("DUR_KEY", "1s"); got != 90*time.Minute {
+		t.Fatalf("expected 90m, got %v", got)
 	}
 }
 
 func TestGetDuration(t *testing.T) {
 	t.Setenv("DUR_KEY", "1h30m")
-	if got := GetDuration("DUR_", "", "KEY", time.Second); got != 90*time.Minute {
+	if got := GetDuration("DUR_KEY", "1s"); got != 90*time.Minute {
 		t.Fatalf("expected 90m, got %v", got)
 	}
 
-	os.Unsetenv("DUR_KEY")
-	t.Setenv("DURF_KEY", "00:00:05.500")
-	if got := GetDuration("DUR_", "DURF_", "KEY", time.Second); got != 5500*time.Millisecond {
+	t.Setenv("DUR_KEY", "5.5s")
+	if got := GetDuration("DUR_KEY", "1s"); got != 5500*time.Millisecond {
 		t.Fatalf("expected 5.5s, got %v", got)
 	}
 
-	os.Unsetenv("DURF_KEY")
-	if got := GetDuration("DUR_", "DURF_", "KEY", time.Second); got != time.Second {
-		t.Fatalf("expected default 1s, got %v", got)
-	}
-}
-
-func TestGetDurationE(t *testing.T) {
-	t.Setenv("DUR_KEY", "1h30m")
-	d, err := GetDurationE("DUR_", "", "KEY", time.Second)
-	if err != nil || d != 90*time.Minute {
-		t.Fatalf("expected (90m, nil), got (%v, %v)", d, err)
-	}
-
-	t.Setenv("DUR_KEY", "garbage")
-	d, err = GetDurationE("DUR_", "", "KEY", time.Second)
-	if err == nil {
-		t.Fatalf("expected error for invalid duration")
-	}
-	if d != time.Second {
-		t.Fatalf("expected default 1s on error, got %v", d)
-	}
-	if !strings.Contains(err.Error(), "DUR_KEY") {
-		t.Fatalf("error should name the variable, got %v", err)
-	}
-
 	os.Unsetenv("DUR_KEY")
-	d, err = GetDurationE("DUR_", "", "KEY", time.Second)
-	if err != nil || d != time.Second {
-		t.Fatalf("expected (1s, nil) when unset, got (%v, %v)", d, err)
+	if got := GetDuration("DUR_KEY", "1s"); got != time.Second {
+		t.Fatalf("expected default 1s, got %v", got)
 	}
 }
 
@@ -457,8 +358,14 @@ func TestLoadDotEnvNoFileFound(t *testing.T) {
 }
 
 func TestGetDurationInvalidValueFallsBackToDefault(t *testing.T) {
-	t.Setenv("DUR_KEY", "not-a-duration")
-	if got := GetDuration("DUR_", "", "KEY", 2*time.Second); got != 2*time.Second {
-		t.Fatalf("expected default 2s, got %v", got)
-	}
+	// GetDuration panics on unparseable values.
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic for invalid duration")
+			}
+		}()
+		t.Setenv("DUR_KEY", "not-a-duration")
+		GetDuration("DUR_KEY", "2s")
+	}()
 }
